@@ -16,15 +16,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 import React from 'react';
-import {ActionButton} from 'office-ui-fabric-react/lib/Button';
+import { ActionButton } from 'office-ui-fabric-react/lib/Button';
 
-import t from '../../tachyons.css';
+import t from '../../../../../components/tachyons.scss';
 
 const Top = () => (
   <div className={t.flex}>
     <div>
       <ActionButton
-        iconProps={{iconName: 'revToggleKey'}}
+        iconProps={{ iconName: 'revToggleKey' }}
         href='/job-list.html'
       >
         Back to Jobs

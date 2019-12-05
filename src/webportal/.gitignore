@@ -1,6 +1,10 @@
+# PAI Version directory
+version/
+
 *.zip
 job-docs.md
 job-submit.example.json
+/dist/
 
 # gitignore file for node js
 # Created by GitHub (https://github.com/github/gitignore/blob/master/Node.gitignore)
@@ -66,3 +70,9 @@ typings/
 
 # css TypeScript definition files
 *.css.d.ts
+
+# Webpack bundle profile file
+bundle.profile.json
+
+# Help docs images
+src/app/job/job-docs/imgs/

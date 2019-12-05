@@ -6,6 +6,7 @@
 
 import { injectable } from 'inversify';
 import { clone, range } from 'lodash';
+import { IAuthnInfo, ILoginInfo, OpenPAIClient } from 'openpai-js-sdk';
 import * as request from 'request-promise-native';
 import * as vscode from 'vscode';
 
@@ -19,6 +20,7 @@ import { ClusterExplorerChildNode, ConfigurationTreeDataProvider, ITreeData } fr
 import { IPAICluster } from './paiInterface';
 
 import semverCompare = require('semver-compare'); // tslint:disable-line
+import { login } from './azureADLogin';
 
 export interface IConfiguration {
     readonly version: string;
@@ -54,11 +56,13 @@ export class ClusterManager extends Singleton {
         name: 'Sample Cluster',
         username: '',
         password: '',
+        token: '',
         rest_server_uri: '127.0.0.1:9186',
         hdfs_uri: 'hdfs://127.0.0.1:9000',
         webhdfs_uri: '127.0.0.1:50070',
         grafana_uri: '127.0.0.1:3000',
-        k8s_dashboard_uri: '127.0.0.1:9090'
+        k8s_dashboard_uri: '127.0.0.1:9090',
+        protocol_version: '2'
     };
 
     private onDidChangeEmitter: vscode.EventEmitter<IClusterModification> = new vscode.EventEmitter<IClusterModification>();
@@ -90,6 +94,7 @@ export class ClusterManager extends Singleton {
         this.configuration = this.context.globalState.get<IConfiguration>(ClusterManager.CONF_KEY) || ClusterManager.default;
         try {
             await this.validateConfiguration();
+            await this.ensureProtocolVersion();
         } catch (ex) {
             await this.askConfigurationFix(__('cluster.activate.error', [ex]));
         }
@@ -105,8 +110,79 @@ export class ClusterManager extends Singleton {
         }
     }
 
+    public async ensureProtocolVersion(): Promise<void> {
+        let updated: Boolean = true;
+        const list: Promise<any>[] = [];
+        this.configuration!.pais.forEach((config: IPAICluster, i, pais) => {
+            if (!config.protocol_version) {
+                updated = true;
+                list.push(request
+                    .get(`http://${config.rest_server_uri}/api/v2/jobs/protocolversion/config`, { timeout: 5 * 1000 })
+                    .then(() => {
+                        pais[i].protocol_version = '2';
+                    })
+                    .catch((err) => {
+                        const error: any = JSON.parse(err.error);
+                        if (error.code === 'NoApiError') {
+                            pais[i].protocol_version = '1';
+                        } else {
+                            pais[i].protocol_version = '2';
+                        }
+                    }));
+            }
+        });
+
+        if (updated) {
+            await Promise.all(list).then(async () => await this.save());
+        }
+    }
+
     public get allConfigurations(): IPAICluster[] {
         return this.configuration!.pais;
+    }
+
+    public async autoAddOIDCUserInfo(cluster: IPAICluster): Promise<void> {
+        try {
+            const client: OpenPAIClient = new OpenPAIClient({
+                rest_server_uri: cluster.rest_server_uri
+            });
+
+            const authnInfo: IAuthnInfo = await client.authn.info();
+
+            if (authnInfo.authn_type === 'OIDC') {
+                const loginInfo: ILoginInfo = await login(
+                    `https://${cluster.rest_server_uri}`,
+                    `https://${cluster.web_portal_uri}`,
+                    async () => {
+                        const response: string | undefined = await vscode.window.showInformationMessage(
+                            // tslint:disable-next-line: no-multiline-string
+                            __('cluster.login.timeout'),
+                            __('cluster.login.openPortal'));
+                        if (response) {
+                            cluster.username = '';
+                            cluster.token = '';
+                            cluster.password = undefined;
+                            await Util.openExternally(cluster.web_portal_uri!);
+                        }
+                    }
+                );
+
+                let clusterToken: string = loginInfo.token;
+
+                try {
+                    const response: any = await client.authn.createApplicationToken(clusterToken);
+                    clusterToken = response.token;
+                } catch (error) {
+                    console.log('Get application token fail, use user token.');
+                }
+
+                cluster.username = loginInfo.user;
+                cluster.token = clusterToken;
+                cluster.password = undefined;
+            }
+        } catch (ex) {
+            cluster.token = '';
+        }
     }
 
     public async add(): Promise<void> {
@@ -125,6 +201,7 @@ export class ClusterManager extends Singleton {
         if (!host) {
             return;
         }
+
         const cluster: IPAICluster = clone(ClusterManager.paiDefault);
         try {
             await vscode.window.withProgress(
@@ -148,6 +225,7 @@ export class ClusterManager extends Singleton {
             cluster.web_portal_uri = `${host}`;
             cluster.hdfs_uri = `hdfs://${host}:9000`;
             cluster.webhdfs_uri = `${host}/webhdfs/api/v1`;
+            await this.autoAddOIDCUserInfo(cluster);
         } catch {
             cluster.name = host;
             cluster.rest_server_uri = `${host}:9186`;
@@ -156,7 +234,40 @@ export class ClusterManager extends Singleton {
             cluster.web_portal_uri = `${host}`;
             cluster.hdfs_uri = `hdfs://${host}:9000`;
             cluster.k8s_dashboard_uri = `${host}:9090`;
+            await this.autoAddOIDCUserInfo(cluster);
         }
+
+        // Config the protocol version.
+        try {
+            await vscode.window.withProgress(
+            {
+                location: vscode.ProgressLocation.Notification,
+                title: __('cluster.add.checkprotocolversion'),
+                cancellable: true
+            },
+            (_progress, cancellationToken) => new Promise((resolve, reject) => {
+                const req: request.RequestPromise = request
+                    .get(`http://${cluster.rest_server_uri}/api/v2/jobs/protocolversion/config`, { timeout: 5 * 1000 });
+                cancellationToken.onCancellationRequested(() => {
+                    req.abort();
+                    reject();
+                });
+                req.then(resolve).catch(reject);
+            }));
+            cluster.protocol_version = '2';
+        } catch (exception) {
+            try {
+                const error: any = JSON.parse(exception.error);
+                if (error.code === 'NoApiError') {
+                    cluster.protocol_version = '1';
+                } else {
+                    cluster.protocol_version = '2';
+                }
+            } catch (err) {
+                cluster.protocol_version = '2';
+            }
+        }
+
         return this.edit(this.allConfigurations.length, cluster);
     }
 

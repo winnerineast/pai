@@ -17,31 +17,20 @@
 
 // module dependencies
 const express = require('express');
-const token = require('../middlewares/token');
-const userConfig = require('../config/user');
-const userController = require('../controllers/user');
-const param = require('../middlewares/parameter');
-const jobRouter = require('./job');
+const launcherConfig = require('@pai/config/launcher');
+const token = require('@pai/middlewares/token');
+const userController = require('@pai/controllers/v2/user');
+
 
 const router = new express.Router();
 
-router.route('/')
-    /** PUT /api/v1/user - Create or update a user */
-    .put(token.check, param.validate(userConfig.userPutInputSchema), userController.update)
+router.route('/:username/')
+/** Get /api/v1/user/:username */
+  .get(token.check, userController.getUser);
 
-    /** DELETE /api/v1/user - Remove a user */
-    .delete(token.check, param.validate(userConfig.userDeleteInputSchema), userController.remove)
 
-    /** Get /api/v1/user - Get user info list */
-    .get(token.check, userController.getUserList);
+if (launcherConfig.type === 'yarn') {
+  router.use('/:username/jobs', require('@pai/routes/job'));
+}
 
-router.route('/:username/virtualClusters')
-    .put(token.check, param.validate(userConfig.userVcUpdateInputSchema), userController.updateUserVc);
-
-router.route('/:username/githubPAT')
-    .put(token.check, param.validate(userConfig.userGithubPATUpdateInputSchema), userController.updateUserGithubPAT);
-
-router.use('/:username/jobs', jobRouter);
-
-// module exports
 module.exports = router;

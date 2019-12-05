@@ -22,10 +22,15 @@ WORKDIR /usr/src/app
 ENV NODE_ENV=production \
     SERVER_PORT=8080
 
-COPY package.json .
-RUN yarn install
 COPY dependency/ ../../
 COPY . .
+
+RUN yarn --no-git-tag-version --new-version version \
+    "$(cat version/PAI.VERSION)"
+RUN npm install json -g
+RUN json -I -f package.json -e "this.commitVersion=\"`cat version/COMMIT.VERSION`\""
+# Install dev-dependencies when building image
+RUN yarn install --production=false
 RUN npm run build
 
 EXPOSE ${SERVER_PORT}

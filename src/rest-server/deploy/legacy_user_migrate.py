@@ -7,6 +7,8 @@ import http.client
 import json
 import base64
 
+from kubernetes import client, config
+from kubernetes.client.rest import ApiException
 
 class EtcdUser:
 
@@ -19,14 +21,14 @@ class EtcdUser:
 
 class TransferClient:
 
-    def __init__(self, etcd_uri, k8s_uri):
+    def __init__(self, etcd_uri, k8s_uri, in_cluster=False):
         self.etcd_uri = etcd_uri
         self.k8s_uri = k8s_uri
         self.etcd_conn = http.client.HTTPConnection(self.etcd_uri)
-        self.k8s_conn = http.client.HTTPConnection(self.k8s_uri)
         self.flag_path = '/v2/keys/transferFlag'
         self.etcd_prefix = '/users/'
         self.secret_ns = "pai-user"
+        self.in_cluster = in_cluster
 
     def etcd_data_parse(self):
         etcd_result = http_get(self.etcd_conn, "/v2/keys/users?recursive=true")
@@ -79,29 +81,74 @@ class TransferClient:
 
         return post_data_dict
 
-    def prepare_secret_base_path(self):
-        ns_res = http_get(self.k8s_conn, '/api/v1/namespaces/{0}'.format(self.secret_ns))
-        if ns_res['code'] == 200:
-            return
-        elif ns_res['code'] == 404:
-            payload = {"metadata":{"name":self.secret_ns}}
-            res = http_post(self.k8s_conn, '/api/v1/namespaces', json.dumps(payload))
-            if res['code'] == 201:
-                logger.info("Create user info namespace successfully")
-            else:
-                logger.error("Create user info namespace failed")
-                sys.exit(1)
+    def list_all_secrets_from_namespace(self, namespace):
+        if self.in_cluster:
+            config.load_incluster_config()
         else:
-            logger.error("Connect k8s cluster failed")
+            config.load_kube_config(config_file="~/.kube/config")
+        try:
+            api_instance = client.CoreV1Api()
+            api_response = api_instance.list_namespaced_secret(namespace)
+            return api_response.items
+        except ApiException as e:
+            if e.status == 404:
+                return []
+            logger.error('Exception when calling CoreV1Api->list_namespaced_secret: %s\n' % e)
             sys.exit(1)
 
-    def create_secret_user(self, payload):
-        check_res = http_get(self.k8s_conn, '/api/v1/namespaces/{0}/secrets/{1}'.format(self.secret_ns, payload['metadata']['name']))
-        if check_res['code'] == 404:
-            post_res = http_post(self.k8s_conn, '/api/v1/namespaces/{0}/secrets/'.format(self.secret_ns), json.dumps(payload))
-            if post_res['code'] != 201:
-                logger.error("Create user in k8s secret failed")
+    def create_group_if_not_exist(self, name):
+        if self.in_cluster:
+            config.load_incluster_config()
+        else:
+            config.load_kube_config(config_file="~/.kube/config")
+        try:
+            api_instance = client.CoreV1Api()
+            api_instance.read_namespace(name)
+        except ApiException as e:
+            if e.status == 404:
+                api_instance = client.CoreV1Api()
+                meta_data = client.V1ObjectMeta()
+                meta_data.name = name
+                body = client.V1Namespace(
+                  metadata=meta_data
+                )
+                api_instance.create_namespace(body)
+                return True
+            logger.error("Failed to create namespace [{0}]".format(name))
+            sys.exit(1)
+        return False
+
+    def create_secret_in_namespace_if_not_exist(self, payload, namespace):
+        if self.in_cluster:
+            config.load_incluster_config()
+        else:
+            config.load_kube_config(config_file="~/.kube/config")
+        try:
+            api_instance = client.CoreV1Api()
+            api_instance.read_namespaced_secret(payload['metadata']['name'], namespace)
+        except ApiException as e:
+            if e.status == 404:
+                try:
+                    api_instance = client.CoreV1Api()
+                    meta_data = client.V1ObjectMeta()
+                    meta_data.name = payload['metadata']['name']
+                    body = client.V1Secret(
+                        metadata=meta_data,
+                        data=payload['data']
+                    )
+                    api_instance.create_namespaced_secret(namespace, body)
+                except ApiException as create_e:
+                    logger.error("Exception when calling CoreV1Api->create_namespaced_secret: %s\n" % create_e)
+                    sys.exit(1)
+            else:
+                logger.error("Exception when calling CoreV1Api->read_namespaced_secret: %s\n" % e)
                 sys.exit(1)
+
+    def prepare_secret_base_path(self):
+        self.create_group_if_not_exist(self.secret_ns)
+
+    def create_secret_user(self, payload):
+        self.create_secret_in_namespace_if_not_exist(payload, self.secret_ns)
 
     def check_transfer_flag(self):
         check_res = http_get(self.etcd_conn, self.flag_path)
@@ -157,30 +204,34 @@ def main():
         '-k', '--k8sUri',
         type=str,
         required=True)
+    parser.add_argument(
+        '-i', '--incluster',
+        required=False,
+        default=False,
+        action='store_true')
     args = parser.parse_args()
 
     etcd_uri = args.etcdUri.split(',')[0].replace('http://','')
+    in_cluster = args.incluster
 
     logger.info('Starts to migrate legacy user data from etcd to kubernetes secrets')
 
-    transferCli = TransferClient(etcd_uri, args.k8sUri.replace('http://',''))
+    transferCli = TransferClient(etcd_uri, args.k8sUri.replace('http://',''), in_cluster)
 
-    if transferCli.check_transfer_flag():
-        logger.info("Etcd data has already been transferred to k8s secret")
-        return
-
-    etcd_user_list = transferCli.etcd_data_parse()
-    if etcd_user_list:
-        transferCli.prepare_secret_base_path()
-        for user in etcd_user_list:
-            secret_post_data = transferCli.secret_data_prepare(user)
-            transferCli.create_secret_user(secret_post_data)
+    if transferCli.check_transfer_flag() is False and in_cluster is False:
+        etcd_user_list = transferCli.etcd_data_parse()
+        if etcd_user_list:
+            transferCli.prepare_secret_base_path()
+            for user in etcd_user_list:
+                secret_post_data = transferCli.secret_data_prepare(user)
+                transferCli.create_secret_user(secret_post_data)
+        else:
+            logger.info("No legacy data found")
+        http_post(transferCli.etcd_conn, transferCli.flag_path)
+        logger.info('Legacy user data transfer from etcd to kubernetes secret (pai-user namespace) successfully')
     else:
-        logger.info("No legacy data found")
+        logger.info("Etcd data has already been transferred to k8s secret")
 
-    http_post(transferCli.etcd_conn, transferCli.flag_path)
-
-    logger.info('Legacy user data transfer from etcd to kubernetes secret successfully')
 
 if __name__ == "__main__":
     main()

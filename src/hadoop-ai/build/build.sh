@@ -35,6 +35,8 @@ git apply /docker-executor.patch
 # to avoid potential endless loop, refer to https://issues.apache.org/jira/browse/YARN-8513?page=com.atlassian.jira.plugin.system.issuetabpanels%3Aall-tabpanel
 git apply /YARN-8896-2.9.0.patch
 git apply /hadoop-ai-fix.patch
+git apply /hadoop-2.9.0-fix.patch
+git apply /hadoop-ai-port-conflict.patch
 
 mvn package -Pdist,native -DskipTests -Dmaven.javadoc.skip=true -Dtar
 

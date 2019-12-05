@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 def load_yaml_file(path):
 
     with open(path, "r") as f:
-        file_data = yaml.load(f)
+        file_data = yaml.load(f, yaml.SafeLoader)
 
     return file_data
 
@@ -57,8 +57,8 @@ def execute_shell(shell_cmd, error_msg):
 
 
 def execute_shell_retry(shell_cmd, error_msg, retry_count):
-    
-    count = 0    
+
+    count = 0
     while count < retry_count:
         try:
             subprocess.check_call( shell_cmd, shell=True )
@@ -199,29 +199,19 @@ def sftp_paramiko(src, dst, filename, host_config):
     # First make sure the folder exist.
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(hostname=hostip, port=port, key_filename=key_filename, username=username, password=password)
+    ssh.connect(hostname=hostip, port=port, key_filename=key_filename, username=username, password=password, allow_agent=True)
 
-    stdin, stdout, stderr = ssh.exec_command("sudo mkdir -p {0}".format(dst), get_pty=True)
     password = password if password is not None else ''
-    stdin.write(password + '\n')
-    stdin.flush()
+    stdin, stdout, stderr = ssh.exec_command("echo '{0}' | sudo -S mkdir -p {1}".format(password, dst), get_pty=True)
     for response_msg in stdout:
         print(response_msg.encode('utf-8').strip('\n'))
 
-    ssh.close()
-
     # Put the file to target Path.
-    transport = paramiko.Transport((hostip, port))
-    pkey = None
-    if key_filename is not None:
-        pkey = paramiko.RSAKey.from_private_key_file(key_filename)
-    transport.connect(username=username, pkey=pkey, password=password)
-
-    sftp = paramiko.SFTPClient.from_transport(transport)
+    sftp = ssh.open_sftp()
     sftp.put('{0}/{1}'.format(src, filename), '{0}/{1}'.format(dst, filename))
     sftp.close()
 
-    transport.close()
+    ssh.close()
 
     return True
 
@@ -261,11 +251,12 @@ def ssh_shell_paramiko_with_result(host_config, commandline):
             key_filename = str(host_config['keyfile-path'])
         else:
             logger.warn("The key file: {0} specified doesn't exist".format(host_config['keyfile-path']))
+    logger.info("Start executing the command on host [{0}]: {1}".format(hostip, commandline))
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(hostname=hostip, port=port, key_filename=key_filename, username=username, password=password)
     stdin, stdout, stderr = ssh.exec_command(commandline, get_pty=True)
-    logger.info("Executing the command on host [{0}]: {1}".format(hostip, commandline))
+    logger.info("Finished executing the command on host [{0}]: {1}".format(hostip, commandline))
     result_stdout = ""
     for response_msg in stdout:
         result_stdout += response_msg
@@ -313,10 +304,10 @@ def ssh_shell_with_password_input_paramiko(host_config, commandline):
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(hostname=hostip, port=port, key_filename=key_filename, username=username, password=password)
-    stdin, stdout, stderr = ssh.exec_command(commandline, get_pty=True)
     password = password if password is not None else ''
-    stdin.write(password + '\n')
-    stdin.flush()
+    if (commandline.strip().startswith('sudo')):
+        commandline = commandline.replace('sudo', 'sudo -S', 1)
+    stdin, stdout, stderr = ssh.exec_command("echo '{0}' | {1}".format(password, commandline), get_pty=True)
     logger.info("Executing the command on host [{0}]: {1}".format(hostip, commandline))
     for response_msg in stdout:
         print (response_msg.encode('utf-8').strip('\n'))

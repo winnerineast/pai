@@ -3,99 +3,109 @@
 A tool to manage your storage config.
 
 ## Index
-- [ Init storage settings ](#Init)
-    - [Init with no default external storage](#Init_None)
-    - [Init with a nfs server as default external storage](#Init_Nfs)
+- [ Manage server ](#Server_config)
+    - [ Set server ](#Server_set)
+        - [ Set nfs server ](#Server_set_nfs)
+        - [ Set samba server ](#Server_set_samba)
+        - [ Set azurefile server ](#Server_set_azurefile)
+        - [ Set azureblob server ](#Server_set_azureblob)
+        - [ Set hdfs server ](#Server_set_hdfs)
+    - [ List server ](#Server_list) 
+    - [ Delete server ](#Server_delete) 
 
-- [ Manage Server Config ](#Server_config)
-    - [ Set server config for nfs ](#Server_set)
-    - [ List server config ](#Server_list)
-	- [ Create path for server ](#Server_createpath)
+- [ Manage config ](#Config_config)
+    - [ Set config ](#Config_set)
+    - [ List config ](#Config_list) 
+    - [ Delete config ](#Config_delete) 
 
-- [ Manage user config ](#User_config)
-    - [ Set user default server ](#User_setdefault)
-    - [ List user config ](#User_list) 
-
-- [ Push storage settings ](#Push)
-    - [ Push server settings ](#Push_server)
-    - [ Push user settings ](#Push_user)
+- [ Manage group storage access ](#Groupsc_config)
+    - [ Add group storage config ](#Groupsc_add)
+    - [ List group storage configs ](#Groupsc_list) 
+    - [ Delete group storage config ](#Groupsc_delete) 
 
 
+## Manage Server <a name="Server_config"></a> 
+Manage server in PAI. Server how PAI access a nas server.
+### Set server <a name="Server_set"></a> 
 
-## Init storage settings <a name="Init"></a>
-
-### Init with no default external storage <a name="Init_None"></a>
-
+#### Set nfs server <a name="Server_set_nfs"></a> 
 ```
-python storagectl.py init [-f] none  
+python storagectl.py server set NAME nfs ADDRESS ROOTPATH
 ```
 
-- Create default.json with no storage server.
-	- If -f was specified, it will override existing default.json on k8s server settings, else it will exit if default.json already exists.
-	- Create default user storage settings for all PAI users as well
-
-### Init with a nfs server as default external storage <a name="Init_Nfs"></a>
+#### Set samba server <a name="Server_set_samba"></a> 
 ```
-python storagectl.py init [-f] nfs address rootpath  
+python storagectl.py server set NAME samba ADDRESS ROOTPATH USERNAME PASSWORD DOMAIN
 ```
-- Create default.json with nfs server.
-	- If -f was specified, it will override existing default.json on k8s server settings, else it will exit if default.json already exists.
-	- Create default user storage settings for all PAI users as well
 
-
-## Manage Server Config <a name="Server_config"></a> 
-
-### Set server config for nfs <a name="Server_set"></a> 
+#### Set azurefile server <a name="Server_set_azurefile"></a> 
 ```
-python storagectl.py server set SERVER_NAME nfs ADDRESS ROOT_PATH [--sharedfolders SHARED_FOLDERS [SHARED_FOLDERS ...]] [--privatefolders PRIVATE_FOLDERS [PRIVATE_FOLDERS ...]] 
+python storagectl.py server set NAME azurefile DATASTORE FILESHARE ACCOUNTNAME KEY [-p PROXY_ADDRESS PROXY_PASSWORD]
 ```
-- Create or modify server config
-- If '--sharedfolders' is set, create shared folders ROOT_PATH/SHARED_FOLDERS on remote server.
-- If '--privatefolders' is set, create user private folders ROOT_PATH/PRIVATE_FOLDERS/USER_NAME for every user associated with the server on remote server.
 
-### List server config <a name="Server_list"></a> 
+#### Set azureblob server <a name="Server_set_azureblob"></a> 
 ```
-python storagectl.py server list
+python storagectl.py server set NAME azureblob DATASTORE CONTAINERNAME ACCOUNTNAME KEY
 ```
-- List all servers
 
-### Create path for server <a name="Server_createpath"></a> 
+#### Set hdfs server <a name="Server_set_hdfs"></a> 
 ```
-python storagectl.py server createpath SERVER_NAME
+python storagectl.py server set NAME hdfs NAMENODE PORT
 ```
-- Check and create path for server if needed
 
-
-## Manage User Config <a name="User_config"></a> 
-
-### Set user default server <a name="User_setdefault"></a> 
+### List server <a name="Server_list"></a> 
 ```
-python storagectl.py user setdefault USER_NAME SERVER_NAME
+python storagectl.py server list [-n SERVER_NAME_1, SERVER_NAME_2 ...]
 ```
-- Set default server for user
-	- If privatefolders was defined on server, create privae folders for user on ROOT_PATH/PRIVATE_FOLDERS/USER_NAME
+- If -n specified, list certain servers. Otherwise list all servers.
 
-### List user config <a name="User_list"></a> 
+### Delete server <a name="Server_delete"></a> 
 ```
-python storagectl.py user list
+python storagectl.py user delete SERVER_NAME
 ```
-- List all users
 
 
-## Push storage settings <a name="Push"></a>
-
-### Push server settings <a name="Push_server"></a>
-
+## Manage Config <a name="Config_config"></a> 
+Manage configs for group in PAI. Config defines a set of mount infos. Every config belongs to a group. That is to say, one group may have 0 to n configs.
+### Set config <a name="Config_set"></a> 
 ```
-python storagectl.py push server /path/to/server-config/dir/or/file
+python storagectl.py config set CONFIG_NAME [-m MOUNT_POINT SERVER PATH]... [-d]
 ```
-- Create or update server config
+- If -d is set, means mount config storage by default.
+- -m means the mount info for config. If -m specified, the PATH on SERVER will be mount to MOUNT_POINT.
+    - [Job Environment Varialbes](https://github.com/microsoft/pai/blob/master/docs/job_tutorial.md#environment-variables) can be referenced In PATH. Please use '' to quote job environment variables to avoid refernce to local variables in dev-box. 
 
-
-### Push user settings <a name="Push_user"></a>
-
+For example, suppose we have set config using:
 ```
-python storagectl.py push user /path/to/user-config/dir/or/file
+python storagectl.py config set SAMPLE_CONFIG -m /mnt/job SAMPLE_SERVER 'users/${PAI_USER_NAME}/jobs/${PAI_JOB_NAME}'
 ```
-- Create or update user storage config
+If current user is 'paiuser' and current job is 'job-TEST'. This config will mount SAMPLE_SERVER/users/paiuser/jobs/job-TEST to /mnt/job
 
+### List config <a name="Config_list"></a> 
+```
+python storagectl.py config list [-n CONFIG_NAME_1, CONFIG_NAME_2 ...]
+```
+- If -n specified, list certain configs. Otherwise list all config.
+
+### Delete config <a name="Config_delete"></a> 
+```
+python storagectl.py config delete CONFIG_NAME
+```
+
+
+## Manage group storage access <a name="Groupsc_config"></a> 
+Manage PAI group's storage config access.
+### Add group storage config <a name="Groupsc_set"></a> 
+```
+python storagectl.py groupsc add GROUP_NAME CONFIG_NAME
+```
+
+### List group storage config <a name="Groupsc_list"></a> 
+```
+python storagectl.py groupsc list GROUP_NAME
+```
+
+### Delete group storage config <a name="Groupsc_delete"></a> 
+```
+python storagectl.py groupsc delete GROUP_NAME CONFIG_NAME
+```

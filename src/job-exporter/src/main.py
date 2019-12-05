@@ -9,6 +9,7 @@ import signal
 import faulthandler
 import gc
 import datetime
+import shutil
 
 import prometheus_client
 from prometheus_client import Gauge
@@ -54,7 +55,32 @@ class CustomCollector(object):
 
 def config_environ():
     """ since job-exporter needs to call nvidia-smi, we need to change
-    LD_LIBRARY_PATH to correct value """
+    LD_LIBRARY_PATH and PATH to correct value """
+    deploy_env = os.environ.get("DEPLOY_ENV")
+    # Refer to issue: https://github.com/Azure/AKS/issues/1271, we need to set nvdia-smi manually
+    if deploy_env == "aks":
+        host_usr_bin_dir = os.environ.get("HOST_USR_BIN_DIR")
+        host_nvidia_dir = os.environ.get("HOST_NVIDIA_DIR")
+        if not host_usr_bin_dir or not host_nvidia_dir:
+            logger.error("Failed to get HOST_USR_BIN_DIR or HOST_NVIDIA_DIR env")
+            raise Exception("Environment not set correctly, HOST_USR_BIN_DIR is{},\
+                             HOST_NVIDIA_DIR is {}".format(host_usr_bin_dir, host_nvidia_dir))
+
+        if os.path.isfile(os.path.join(host_usr_bin_dir, "nvidia-smi")):
+            logger.info("nvidia-smi already under host /usr/bin dir")
+            return
+
+        try:
+            shutil.copy(os.path.join(host_nvidia_dir, "bin/nvidia-smi"), host_usr_bin_dir)
+        except Exception:
+            logger.exception("Failed to copy nvidia-smi in aks")
+            return
+
+        os.environ["PATH"] = os.environ["PATH"] + ":" + os.path.join(host_nvidia_dir, "bin")
+        logger.info("Copy nvidia-smi to %s successfully, PATH is %s",
+                    host_usr_bin_dir, os.environ["PATH"])
+        return
+
     driver_path = os.environ.get("NV_DRIVER")
     logger.debug("NV_DRIVER is %s", driver_path)
 
@@ -63,7 +89,12 @@ def config_environ():
             os.path.join(driver_path, "lib") + os.pathsep + \
             os.path.join(driver_path, "lib64")
 
-    logger.debug("LD_LIBRARY_PATH is %s", os.environ["LD_LIBRARY_PATH"])
+    driver_bin_path = os.path.join(driver_path, "bin")
+    os.environ["PATH"] = os.environ["PATH"] + ":" + driver_bin_path
+
+    logger.info("LD_LIBRARY_PATH is %s, PATH is %s",
+            os.environ["LD_LIBRARY_PATH"],
+            os.environ["PATH"])
 
 
 def try_remove_old_prom_file(path):
@@ -82,16 +113,17 @@ def get_gpu_count(path):
 
     logger.debug("hostname is %s, ip is %s", hostname, ip)
 
-    with open(path) as f:
-        gpu_config = json.load(f)
+    if os.path.isfile(path):
+        with open(path) as f:
+            gpu_config = json.load(f)
 
-    if hostname is not None and gpu_config["nodes"].get(hostname) is not None:
-        return gpu_config["nodes"][hostname]["gpuCount"]
-    elif ip is not None and gpu_config["nodes"].get(ip) is not None:
-        return gpu_config["nodes"][ip]["gpuCount"]
-    else:
-        logger.warning("failed to find gpu count from config %s", gpu_config)
-        return 0
+        if hostname is not None and gpu_config["nodes"].get(hostname) is not None:
+            return gpu_config["nodes"][hostname]["gpuCount"]
+        elif ip is not None and gpu_config["nodes"].get(ip) is not None:
+            return gpu_config["nodes"][ip]["gpuCount"]
+
+    logger.warning("failed to find gpu count from config %s", path)
+    return 0
 
 
 def register_stack_trace_dump():

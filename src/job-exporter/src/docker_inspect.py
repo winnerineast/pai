@@ -27,17 +27,18 @@ logger = logging.getLogger(__name__)
 
 class InspectResult(object):
     """ Represents a task meta data, parsed from docker inspect result """
-    def __init__(self, username, job_name, role_name, task_index, gpu_ids, pid):
+    def __init__(self, username, job_name, role_name, task_index, gpu_ids, job_instance_id, pid):
         self.username = username
         self.job_name = job_name
         self.role_name = role_name
         self.task_index = task_index
         self.gpu_ids = gpu_ids # comma seperated str, str may be minor_number or UUID
         self.pid = pid
+        self.job_instance_id = job_instance_id # Used to distinguish job instance with same name but different retry number.
 
     def __repr__(self):
-        return "username %s, job_name %s, role_name %s, task_index %s, gpu_ids %s, pid %s" % \
-                (self.username, self.job_name, self.role_name, self.task_index, self.gpu_ids, self.pid)
+        return "username %s, job_name %s, role_name %s, task_index %s, gpu_ids %s, job_instance_id %s pid %s" % \
+                (self.username, self.job_name, self.role_name, self.task_index, self.gpu_ids, self.job_instance_id, self.pid)
 
     def __eq__(self, o):
         return self.username == o.username and \
@@ -45,11 +46,12 @@ class InspectResult(object):
                 self.role_name == o.role_name and \
                 self.task_index == o.task_index and \
                 self.gpu_ids == o.gpu_ids and \
+                self.job_instance_id == o.job_instance_id and \
                 self.pid == o.pid
 
 
 keys = {"PAI_JOB_NAME", "PAI_USER_NAME", "PAI_CURRENT_TASK_ROLE_NAME", "GPU_ID",
-        "PAI_TASK_INDEX"}
+        "PAI_TASK_INDEX", "DLWS_JOB_ID", "DLWS_USER_NAME"}
 
 
 def parse_docker_inspect(inspect_output):
@@ -75,18 +77,20 @@ def parse_docker_inspect(inspect_output):
                 m["PAI_TASK_INDEX"] = v
             elif k == "NVIDIA_VISIBLE_DEVICES" and v != "all" and v != "void":
                 m["GPU_ID"] = v
+            
+            if k == "FC_FRAMEWORK_ATTEMPT_INSTANCE_UID" or k == "APP_ID":
+                m["JOB_INSTANCE_ID"] = v
 
     pid = utils.walk_json_field_safe(obj, 0, "State", "Pid")
 
     return InspectResult(
-            m.get("PAI_USER_NAME"),
-            m.get("PAI_JOB_NAME"),
+            m.get("PAI_USER_NAME") or m.get("DLWS_USER_NAME"),
+            m.get("PAI_JOB_NAME") or m.get("DLWS_JOB_ID"),
             m.get("PAI_CURRENT_TASK_ROLE_NAME"),
             m.get("PAI_TASK_INDEX"),
             m.get("GPU_ID"),
+            m.get("JOB_INSTANCE_ID"),
             pid)
-
-    return {"env": envs, "labels": labels, "pid": pid}
 
 def inspect(container_id, histogram, timeout):
     try:

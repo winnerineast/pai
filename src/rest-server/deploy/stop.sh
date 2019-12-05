@@ -23,4 +23,32 @@ if kubectl get daemonset | grep -q "rest-server-ds"; then
     kubectl delete ds rest-server-ds || exit $?
 fi
 
+if kubectl get configmap | grep -q "auth-configuration"; then
+    kubectl delete configmap auth-configuration || exit $?
+fi
+
+if kubectl get configmap | grep -q "job-exit-spec-configuration"; then
+    kubectl delete configmap job-exit-spec-configuration || exit $?
+fi
+
+if kubectl get configmap | grep -q "group-configuration"; then
+    kubectl delete configmap group-configuration || exit $?
+fi
+
+if kubectl get configmap | grep -q "k8s-job-exit-spec-configuration"; then
+    kubectl delete configmap k8s-job-exit-spec-configuration || exit $?
+fi
+
+if kubectl get clusterrolebinding | grep -q "rest-server-role-binding"; then
+    kubectl delete clusterrolebinding rest-server-role-binding || exit $?
+fi
+
+if kubectl get clusterrole | grep "rest-server-role"; then
+    kubectl delete clusterrole rest-server-role || exit $?
+fi
+
+if kubectl get serviceaccount | grep "rest-server-account"; then
+    kubectl delete serviceaccount rest-server-account || exit $?
+fi
+
 popd > /dev/null

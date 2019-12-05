@@ -1,27 +1,62 @@
-import React, {useContext, useMemo} from 'react';
+import c from 'classnames';
+import React, { useState, useContext, useMemo, useLayoutEffect } from 'react';
+import {
+  ColumnActionsMode,
+  DefaultButton,
+  FontClassNames,
+  Link,
+  mergeStyles,
+  Selection,
+  ShimmeredDetailsList,
+  Icon,
+  ColorClassNames,
+  FontSizes,
+  FontWeights,
+} from 'office-ui-fabric-react';
+import { isNil } from 'lodash';
+import { DateTime } from 'luxon';
 
-import {DefaultButton} from 'office-ui-fabric-react/lib/Button';
-import {Link} from 'office-ui-fabric-react/lib/Link';
-import {ColumnActionsMode, Selection} from 'office-ui-fabric-react/lib/DetailsList';
-import {MessageBar, MessageBarType} from 'office-ui-fabric-react/lib/MessageBar';
-import {ShimmeredDetailsList} from 'office-ui-fabric-react/lib/ShimmeredDetailsList';
-import {FontClassNames} from 'office-ui-fabric-react/lib/Styling';
-
-import {DateTime, Duration} from 'luxon';
-
-import {getModified, getDuration, getStatusText} from './utils';
+import { getModified, getStatusText } from './utils';
 import Context from './Context';
+import Filter from './Filter';
 import Ordering from './Ordering';
+import StatusBadge from '../../../../components/status-badge';
+import {
+  getJobDuration,
+  getDurationString,
+  isStoppable,
+} from '../../../../components/util/job';
+import StopJobConfirm from './StopJobConfirm';
 
-const zeroPaddingRowFieldStyle = {
-  marginTop: -11,
-  marginBottom: -11,
-  marginLeft: -12,
-  marginRight: -8,
-};
+import t from '../../../../components/tachyons.scss';
+
+const zeroPaddingClass = mergeStyles({
+  paddingTop: '0px !important',
+  paddingLeft: '0px !important',
+  paddingRight: '0px !important',
+  paddingBottom: '0px !important',
+});
 
 export default function Table() {
-  const {allJobs, stopJob, filteredJobs, setSelectedJobs, filter, ordering, setOrdering, pagination} = useContext(Context);
+  const {
+    stopJob,
+    filteredJobs,
+    setSelectedJobs,
+    selectedJobs,
+    filter,
+    ordering,
+    setOrdering,
+    pagination,
+    setFilter,
+  } = useContext(Context);
+  const [hideDialog, setHideDialog] = useState(true);
+  const [currentJob, setCurrentJob] = useState(null);
+
+  // workaround for fabric's bug
+  // https://github.com/OfficeDev/office-ui-fabric-react/issues/5280#issuecomment-489619108
+  useLayoutEffect(() => {
+    window.dispatchEvent(new Event('resize'));
+  });
 
   /**
    * @type {import('office-ui-fabric-react').Selection}
@@ -39,7 +74,7 @@ export default function Table() {
    * @param {import('office-ui-fabric-react').IColumn} column
    */
   function onColumnClick(event, column) {
-    const {field, descending} = ordering;
+    const { field, descending } = ordering;
     if (field === column.key) {
       if (descending) {
         setOrdering(new Ordering());
@@ -71,7 +106,7 @@ export default function Table() {
     isResizable: true,
     isFiltered: filter.keyword !== '',
     onRender(job) {
-      const {legacy, name, namespace, username} = job;
+      const { legacy, name, namespace, username } = job;
       const href = legacy
         ? `/job-detail.html?jobName=${name}`
         : `/job-detail.html?username=${namespace || username}&jobName=${name}`;
@@ -88,7 +123,9 @@ export default function Table() {
     isSorted: ordering.field === 'modified',
     isSortedDescending: !ordering.descending,
     onRender(job) {
-      return DateTime.fromJSDate(getModified(job)).toLocaleString(DateTime.DATETIME_SHORT_WITH_SECONDS);
+      return DateTime.fromJSDate(getModified(job)).toLocaleString(
+        DateTime.DATETIME_SHORT_WITH_SECONDS,
+      );
     },
   });
   const userColumn = applySortProps({
@@ -109,7 +146,7 @@ export default function Table() {
     headerClassName: FontClassNames.medium,
     isResizable: true,
     onRender(job) {
-      return Duration.fromMillis(getDuration(job)).toFormat(`h:mm:ss`);
+      return getDurationString(getJobDuration(job));
     },
   });
   const virtualClusterColumn = applySortProps({
@@ -157,48 +194,23 @@ export default function Table() {
     isResizable: true,
     isFiltered: filter.statuses.size > 0,
     onRender(job) {
-      /** @type {React.CSSProperties} */
-      const wrapperStyle = {display: 'inline-block', verticalAlign: 'middle', width: '100%'};
-      const statusText = getStatusText(job);
-      /** @type {MessageBarType} */
-      const messageBarType = {
-        Waiting: MessageBarType.warning,
-        Running: MessageBarType.success,
-        Stopping: MessageBarType.severeWarning,
-        Succeeded: MessageBarType.success,
-        Failed: MessageBarType.remove,
-        Stopped: MessageBarType.blocked,
-      }[statusText];
-      const rootStyle = {
-        backgroundColor: {
-          Waiting: '#FCD116',
-          Running: '#0071BC',
-          Stopping: '#0071BC',
-          Succeeded: '#7FBA00',
-          Failed: '#E81123',
-          Stopped: '#B1B5B8',
-        }[statusText],
-      };
-      /** @type {import('@uifabric/styling').IStyle} */
-      const iconContainerStyle = {marginTop: 8, marginBottom: 8, marginLeft: 8};
-      /** @type {import('@uifabric/styling').IStyle} */
-      const iconStyle = {color: 'white'};
-      /** @type {import('@uifabric/styling').IStyle} */
-      const textStyle = {marginTop: 8, marginRight: 8, marginBottom: 8, color: 'white'};
       return (
-        <div style={Object.assign(wrapperStyle, zeroPaddingRowFieldStyle)}>
-          <MessageBar
-            messageBarType={messageBarType}
-            styles={{root: rootStyle, iconContainer: iconContainerStyle, icon: iconStyle, text: textStyle}}
-          >
-            {statusText}
-          </MessageBar>
+        <div
+          style={{
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'start',
+          }}
+        >
+          <StatusBadge status={getStatusText(job)} />
         </div>
       );
     },
   });
 
   /**
+   * action column
    * @type {import('office-ui-fabric-react').IColumn}
    */
   const actionsColumn = {
@@ -206,26 +218,42 @@ export default function Table() {
     minWidth: 100,
     name: 'Actions',
     headerClassName: FontClassNames.medium,
+    className: zeroPaddingClass,
     columnActionsMode: ColumnActionsMode.disabled,
     onRender(job) {
       /**
        * @param {React.MouseEvent} event
        */
-      function onClick(event) {
+      function showDialog(event) {
         event.stopPropagation();
-        stopJob(job);
+        setHideDialog(false);
+        setCurrentJob(job);
       }
-      /** @type {React.CSSProperties} */
-      const wrapperStyle = {display: 'inline-block', verticalAlign: 'middle', width: '100%'};
 
-      const statusText = getStatusText(job);
-      const disabled = statusText !== 'Waiting' && statusText !== 'Running';
+      const disabled =
+        !isStoppable(job) ||
+        (selectedJobs.length !== 0 && !selectedJobs.includes(job));
       return (
-        <div style={Object.assign(wrapperStyle, zeroPaddingRowFieldStyle)} data-selection-disabled>
+        <div
+          style={{
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          data-selection-disabled
+        >
           <DefaultButton
-            iconProps={{iconName: 'StopSolid'}}
+            iconProps={{ iconName: 'StopSolid' }}
+            styles={{
+              root: { backgroundColor: '#e5e5e5' },
+              rootFocused: { backgroundColor: '#e5e5e5' },
+              rootDisabled: { backgroundColor: '#eeeeee' },
+              rootCheckedDisabled: { backgroundColor: '#eeeeee' },
+              icon: { fontSize: 12 },
+            }}
             disabled={disabled}
-            onClick={onClick}
+            onClick={showDialog}
           >
             Stop
           </DefaultButton>
@@ -247,14 +275,50 @@ export default function Table() {
     actionsColumn,
   ];
 
-  return (
-    <ShimmeredDetailsList
-      items={pagination.apply(ordering.apply(filteredJobs || []))}
-      setKey="key"
-      columns={columns}
-      enableShimmer={allJobs === null}
-      shimmerLines={pagination.itemsPerPage}
-      selection={selection}
-    />
-  );
+  if (!isNil(filteredJobs) && filteredJobs.length === 0) {
+    return (
+      <div className={c(t.h100, t.flex, t.itemsCenter, t.justifyCenter)}>
+        <div className={c(t.tc)}>
+          <div>
+            <Icon
+              className={c(ColorClassNames.themePrimary)}
+              style={{ fontSize: FontSizes.xxLarge }}
+              iconName='Error'
+            />
+          </div>
+          <div
+            className={c(t.mt5, FontClassNames.xLarge)}
+            style={{ fontWeight: FontWeights.semibold }}
+          >
+            No results matched your search.
+          </div>
+          <div className={c(t.mt4, FontClassNames.mediumPlus)}>
+            You could search{' '}
+            <Link onClick={() => setFilter(new Filter())}>all the jobs</Link> or
+            try advanced search with Filters.
+          </div>
+        </div>
+      </div>
+    );
+  } else {
+    const items = pagination.apply(ordering.apply(filteredJobs || []));
+    return (
+      <div>
+        <ShimmeredDetailsList
+          items={items}
+          setKey='key'
+          columns={columns}
+          enableShimmer={isNil(filteredJobs)}
+          shimmerLines={pagination.itemsPerPage}
+          selection={selection}
+        />
+        <StopJobConfirm
+          hideDialog={hideDialog}
+          setHideDialog={setHideDialog}
+          currentJob={currentJob}
+          stopJob={stopJob}
+        />
+      </div>
+    );
+  }
 }

@@ -17,9 +17,9 @@
 
 
 // module dependencies
-const param = require('./parameter');
-const jobConfig = require('../config/job');
-const createError = require('../util/error');
+const param = require('@pai/middlewares/parameter');
+const jobConfig = require('@pai/config/job');
+const createError = require('@pai/utils/error');
 
 
 const checkMinTaskNumber = (req, res, next) => {
@@ -45,6 +45,7 @@ const submission = [
 
 const query = (req, res, next) => {
   const query = {};
+
   if (req.query.username) {
     query.username = req.query.username;
   }

@@ -60,6 +60,11 @@ def gen_gpu_mem_util_gauge():
             "gpu memory utilization of card",
             labels=["minor_number"])
 
+def gen_gpu_temperature_gauge():
+    return GaugeMetricFamily("nvidiasmi_temperature",
+            "gpu temperature of card",
+            labels=["minor_number"])
+
 def gen_gpu_ecc_counter():
     return GaugeMetricFamily("nvidiasmi_ecc_error_count",
             "count of nvidia ecc error",
@@ -96,7 +101,8 @@ class ResourceGauges(object):
                 "username",
                 "job_name",
                 "role_name",
-                "task_index"
+                "task_index",
+                "job_instance_id", # Used to distinguish job instance with same name but different retry number.
                 ]
         self.service_labels = ["name"]
 
@@ -345,6 +351,7 @@ class GpuCollector(Collector):
         it easier to do unit test """
         core_utils = gen_gpu_util_gauge()
         mem_utils = gen_gpu_mem_util_gauge()
+        gpu_temp = gen_gpu_temperature_gauge()
         ecc_errors = gen_gpu_ecc_counter()
         mem_leak = gen_gpu_memory_leak_counter()
         external_process = gen_gpu_used_by_external_process_counter()
@@ -358,6 +365,8 @@ class GpuCollector(Collector):
 
             core_utils.add_metric([minor], info.gpu_util)
             mem_utils.add_metric([minor], info.gpu_mem_util)
+            if info.temperature is not None:
+                gpu_temp.add_metric([minor], info.temperature)
             ecc_errors.add_metric([minor, "single"], info.ecc_errors.single)
             ecc_errors.add_metric([minor, "double"], info.ecc_errors.double)
             if info.gpu_mem_util > mem_leak_thrashold and len(info.pids) == 0:
@@ -390,7 +399,7 @@ class GpuCollector(Collector):
                         external_process, zombie_container)
 
         return [core_utils, mem_utils, ecc_errors, mem_leak,
-            external_process, zombie_container]
+            external_process, zombie_container, gpu_temp]
 
     def collect_impl(self):
         gpu_info = nvidia.nvidia_smi(GpuCollector.cmd_histogram,
@@ -448,7 +457,16 @@ class ContainerCollector(Collector):
         "job-exporter",
         "yarn-exporter",
         "nvidia-drivers",
-        "docker-cleaner"
+        "docker-cleaner",
+
+        # Below are DLTS services
+        "nginx",
+        "restfulapi",
+        "weave",
+        "weave-npc",
+        "nvidia-device-plugin-ctr",
+        "mysql",
+        "jobmanager",
         ]))
 
     def __init__(self, name, sleep_time, atomic_ref, iteration_counter, gpu_info_ref,
@@ -493,6 +511,7 @@ class ContainerCollector(Collector):
         result_labels["job_name"] = inspect_info.job_name or "unknown"
         result_labels["role_name"] = inspect_info.role_name or "unknown"
         result_labels["task_index"] = inspect_info.task_index or "unknown"
+        result_labels["job_instance_id"] = inspect_info.job_instance_id or "unknown"
 
         if inspect_info.gpu_ids:
             ids = inspect_info.gpu_ids.replace("\"", "").split(",")

@@ -36,10 +36,14 @@ spec:
         image: {{ cluster_cfg['cluster']['docker-registry']['prefix'] }}webportal:{{ cluster_cfg['cluster']['docker-registry']['tag'] }}
         imagePullPolicy: Always
         env:
+        - name: LAUNCHER_TYPE
+          value: {{ cluster_cfg['rest-server']['launcher-type'] }}
         - name: REST_SERVER_URI
           value: {{ cluster_cfg['rest-server']['uri'] }}
         - name: PROMETHEUS_URI
           value: {{ cluster_cfg['prometheus']['url'] }}
+        - name: LOG_TYPE
+          value: {{ cluster_cfg['webportal']['log-type'] }}
         - name: YARN_WEB_PORTAL_URI
           value: http://{{ cluster_cfg['hadoop-resource-manager']['master-ip'] }}:8088
         - name: GRAFANA_URI
@@ -50,6 +54,19 @@ spec:
           value: {{ cluster_cfg['layout']['kubernetes']['api-servers-url'] }}
         - name: EXPORTER_PORT
           value: "{{ cluster_cfg['node-exporter']['port'] }}"
+        - name: ALERT_MANAGER_URI
+          value: "{{ cluster_cfg['alert-manager']['url'] }}"
+{% if not cluster_cfg['authentication']['OIDC'] %}
+        - name: AUTHN_METHOD
+          value: basic
+{% else %}
+        - name: AUTHN_METHOD
+          value: OIDC
+{% endif %}
+{%- if cluster_cfg['cluster']['common']['job-history'] == "true" %}
+        - name: JOB_HISTORY
+          value: "true"
+{%- endif %}
         - name: PROM_SCRAPE_TIME
           value: {{ cluster_cfg['prometheus']['scrape_interval'] * 10 }}s
         - name: WEBPORTAL_PLUGINS

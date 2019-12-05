@@ -20,16 +20,20 @@
 
 echo "Clean the hadoop-data-node's data on the disk"
 
-if [ -d "/mnt/hdfs/data" ]; then
 
-    rm -rf /mnt/hdfs/data
+rm -rf /mnt/hdfs/data*/* 2>/dev/null
 
-fi
 
 
 if [ -d "/mnt/hadooptmp/datanode" ]; then
 
     rm -rf /mnt/hadooptmp/datanode
+
+fi
+
+if [ -d "/mnt/pai-service-log/data-node" ]; then
+
+    rm -rf /mnt/pai-service-log/data-node
 
 fi
 

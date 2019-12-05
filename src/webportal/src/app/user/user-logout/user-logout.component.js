@@ -15,14 +15,55 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+const querystring = require('querystring');
+const webportalConfig = require('../../config/webportal.config.js');
 
-const userLogout = () => {
+const userLogout = (origin = window.location.href) => {
+  // revoke token
+  const token = cookies.get('token');
+  const url = `${webportalConfig.restServerUri}/api/v1/token/${token}`;
+  fetch(url, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  }).catch(console.err);
+  // clear cookies
   cookies.remove('user');
   cookies.remove('token');
   cookies.remove('admin');
-  cookies.remove('hasGitHubPAT');
   cookies.remove('my-jobs');
-  window.location.replace('/login.html');
+  // redirect
+  if (webportalConfig.authnMethod === 'basic') {
+    if (!origin) {
+      window.location.replace('/index.html');
+    } else {
+      window.location.replace(
+        `/index.html?${querystring.stringify({ from: origin })}`,
+      );
+    }
+  } else {
+    location.href = webportalConfig.restServerUri + '/api/v1/authn/oidc/logout';
+  }
 };
 
-module.exports = {userLogout};
+/**
+ * Clear local tokens only, will not redirect user to oidc logout page
+ * @description Will try to refresh the token if oidc enabled.
+ * @param {string} origin - redirect target after login
+ */
+const clearToken = (origin = window.location.href) => {
+  cookies.remove('user');
+  cookies.remove('token');
+  cookies.remove('admin');
+  cookies.remove('my-jobs');
+  if (!origin) {
+    window.location.replace('/index.html');
+  } else {
+    window.location.replace(
+      `/index.html?${querystring.stringify({ from: origin })}`,
+    );
+  }
+};
+
+module.exports = { userLogout, clearToken };

@@ -33,14 +33,14 @@ class service_management_refresh:
     def __init__(self, kube_config_path=None, service_list=None, **kwargs):
         self.logger = logging.getLogger(__name__)
 
-        self.cluster_object_model = None
-
-        self.kube_config_path = None
-        if kube_config_path != None:
-            self.kube_config_path = kube_config_path
+        self.cluster_object_model = service_management_configuration.get_cluster_object_model_from_k8s(kube_config_path)
+        self.kube_config_path = kube_config_path
+        self.cluster_type = None
 
         if service_list is None:
-            self.service_list = service_management_configuration.get_service_list()
+            if "cluster-type" in self.cluster_object_model["cluster"]["common"]:
+                self.cluster_type = self.cluster_object_model["cluster"]["common"]["cluster-type"]
+            self.service_list = service_management_configuration.get_service_list(self.cluster_type)
         else:
             self.service_list = service_list
         self.logger.info("Get the service-list to manage : {0}".format(str(self.service_list)))
@@ -51,7 +51,7 @@ class service_management_refresh:
         self.logger.info("Begin to refresh all the nodes' labels")
         machinelist = self.cluster_object_model['layout']['machine-list']
 
-        labels = ['pai-master', 'pai-worker', 'no-drivers', 'no-nodeexporter']
+        labels = ['pai-master', 'pai-worker', 'pai-storage', 'no-drivers', 'no-nodeexporter']
         logging.info("Currently supported labels: " + str(labels))
         for label in labels:
             self.label_map[label] = list()
@@ -156,9 +156,6 @@ class service_management_refresh:
         self.done_dict[serv] = True
 
     def run(self):
-
-        self.cluster_object_model = service_management_configuration.get_cluster_object_model_from_k8s(kube_config_path=self.kube_config_path)
-
         self.done_dict = dict()
         self.refresh_all_label()
         for serv in self.service_list:

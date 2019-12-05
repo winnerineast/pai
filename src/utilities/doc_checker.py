@@ -27,7 +27,7 @@ class LinkChecker(markdown.treeprocessors.Treeprocessor):
                         continue
 
                     if not os.path.exists(path):
-                        sys.stderr.write("%s has broken link %s\n" %
+                        sys.stderr.write("Error: %s has broken link %s\n" %
                                 (os.path.join(self.dir_name, self.file_name), link))
                         self.has_error = True
 
@@ -65,9 +65,13 @@ def check_all(doc_root):
         for name in files:
             if name.endswith(".md"):
                 path = os.path.join(root, name)
+                if "/vendor/" in path:
+                    # ignore 3rd party markdown check
+                    continue
 
                 md = markdown.Markdown(extensions=[LinkCheckerExtension(root, name)])
                 with codecs.open(path, "r", "utf-8") as f:
+                    sys.stdout.write("analyzing %s\n" % path)
                     md.convert(f.read())
                 has_error = has_error or md.treeprocessors.get("link_checker").has_error
     return has_error

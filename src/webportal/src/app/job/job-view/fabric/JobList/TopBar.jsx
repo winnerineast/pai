@@ -15,71 +15,143 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import React, {useContext, useMemo, useState} from 'react';
-
-import {CommandBarButton} from 'office-ui-fabric-react/lib/Button';
-import {SearchBox} from 'office-ui-fabric-react/lib/SearchBox';
-import {CommandBar} from 'office-ui-fabric-react/lib/CommandBar';
-import {ContextualMenuItemType} from 'office-ui-fabric-react/lib/ContextualMenu';
+import cookies from 'js-cookie';
+import React, { useContext, useState, useEffect } from 'react';
+import {
+  getTheme,
+  ColorClassNames,
+  CommandBar,
+  CommandBarButton,
+  SearchBox,
+  Stack,
+} from 'office-ui-fabric-react';
 
 import Context from './Context';
 import Filter from './Filter';
-import {getStatusText} from './utils';
 
-/* eslint-disable react/prop-types */
-function FilterButton({defaultRender: Button, ...props}) {
-  const {subMenuProps: {items}} = props;
-  const checkedItems = items.filter((item) => item.checked).map((item) => item.text);
-  const checkedText = checkedItems.length === 0 ? null
-    : checkedItems.length === 1 ? <strong>{checkedItems[0]}</strong>
-    : <strong>{checkedItems[0]}{` (+${checkedItems.length - 1})`}</strong>;
-  return (
-    <Button {...props}>
-      {checkedText}
-    </Button>
-  );
-}
+import webportalConfig from '../../../../config/webportal.config';
+import { clearToken } from '../../../../user/user-logout/user-logout.component';
+import FilterButton from './FilterButton';
+import { isStoppable } from '../../../../components/util/job';
+
+const CURRENT_USER_KEY = '@Me';
+const token = cookies.get('token');
 
 function KeywordSearchBox() {
-  const {filter, setFilter} = useContext(Context);
+  const { filter, setFilter } = useContext(Context);
   function onKeywordChange(keyword) {
-    const {users, virtualClusters, statuses} = filter;
+    const { users, virtualClusters, statuses } = filter;
     setFilter(new Filter(keyword, users, virtualClusters, statuses));
   }
 
   /** @type {import('office-ui-fabric-react').IStyle} */
-  const rootStyles = {backgroundColor: 'transparent', alignSelf: 'center', width: 220};
+  const rootStyles = {
+    backgroundColor: 'transparent',
+    alignSelf: 'center',
+    width: 220,
+  };
   return (
     <SearchBox
       underlined
-      placeholder="Filter by keyword"
-      styles={{root: rootStyles}}
+      placeholder='Filter by keyword'
+      styles={{ root: rootStyles }}
       value={filter.keyword}
       onChange={onKeywordChange}
     />
   );
 }
-/* eslint-enable react/prop-types */
 
 function TopBar() {
   const [active, setActive] = useState(true);
-  const {allJobs, refreshJobs, selectedJobs, stopJob, username, filter, setFilter} = useContext(Context);
+  const [users, setUser] = useState(Object.create(null));
+  const [virtualClusters, setVirtualClusters] = useState(Object.create(null));
 
-  const {users, virtualClusters, statuses} = useMemo(() => {
-    const users = Object.create(null);
-    const virtualClusters = Object.create(null);
-    const statuses = Object.create(null);
+  const statuses = {
+    Waiting: true,
+    Succeeded: true,
+    Running: true,
+    Stopped: true,
+    Failed: true,
+  };
 
-    if (allJobs !== null) {
-      allJobs.forEach(function(job) {
-        users[job.username] = true;
-        virtualClusters[job.virtualCluster] = true;
-        statuses[getStatusText(job)] = true;
-      });
-    }
+  const { refreshJobs, selectedJobs, stopJob, filter, setFilter } = useContext(
+    Context,
+  );
 
-    return {users, virtualClusters, statuses};
-  }, [allJobs]);
+  useEffect(() => {
+    Promise.all([
+      fetch(`${webportalConfig.restServerUri}/api/v2/user`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }).then(async response => {
+        if (response.ok) {
+          const data = await response.json();
+          const users = {};
+          data.forEach(user => {
+            users[user.username] = true;
+          });
+          setUser(users);
+        } else {
+          const data = await response.json().catch(() => {
+            throw new Error(
+              `Failed to fetch user info: ${response.status} ${response.statusText}`,
+            );
+          });
+          if (data.message) {
+            if (data.code === 'UnauthorizedUserError') {
+              alert(data.message);
+              clearToken();
+            } else {
+              throw new Error(`Failed to fetch user info: ${data.message}`);
+            }
+          } else {
+            throw new Error(
+              `Failed to fetch user info: ${response.status} ${response.statusText}`,
+            );
+          }
+        }
+      }),
+      fetch(`${webportalConfig.restServerUri}/api/v2/virtual-clusters`).then(
+        async response => {
+          if (response.ok) {
+            const data = await response.json();
+            const vcs = {};
+            for (const vcName of Object.keys(data)) {
+              vcs[vcName] = true;
+            }
+            setVirtualClusters(vcs);
+            const allValidVC = Object.keys(data);
+            const { keyword, users, virtualClusters, statuses } = filter;
+            const filterVC = new Set(
+              allValidVC.filter(vc => virtualClusters.has(vc)),
+            );
+            setFilter(new Filter(keyword, users, filterVC, statuses));
+          } else {
+            const data = await response.json().catch(() => {
+              throw new Error(
+                `Failed to fetch virtual cluster info: ${response.status} ${response.statusText}`,
+              );
+            });
+            if (data.message) {
+              if (data.code === 'UnauthorizedUserError') {
+                alert(data.message);
+                clearToken();
+              } else {
+                throw new Error(
+                  `Failed to fetch virtual cluster info: ${data.message}`,
+                );
+              }
+            } else {
+              throw new Error(
+                `Failed to fetch virtual cluster info: ${response.status} ${response.statusText}`,
+              );
+            }
+          }
+        },
+      ),
+    ]).catch(err => alert(err.message));
+  }, []);
 
   /**
    * @returns {import('office-ui-fabric-react').ICommandBarItemProps}
@@ -88,7 +160,10 @@ function TopBar() {
     return {
       key: 'stop',
       name: 'Stop',
-      buttonStyles: {root: {backgroundColor: 'transparent', height: '100%'}},
+      buttonStyles: {
+        root: { backgroundColor: 'transparent', height: '100%' },
+        icon: { fontSize: 14 },
+      },
       iconProps: {
         iconName: 'StopSolid',
       },
@@ -105,7 +180,9 @@ function TopBar() {
     return {
       key: 'new',
       name: 'New',
-      buttonStyles: {root: {backgroundColor: 'transparent', height: '100%'}},
+      buttonStyles: {
+        root: { backgroundColor: 'transparent', height: '100%' },
+      },
       iconProps: {
         iconName: 'Add',
       },
@@ -120,7 +197,9 @@ function TopBar() {
     return {
       key: 'refresh',
       name: 'Refresh',
-      buttonStyles: {root: {backgroundColor: 'transparent', height: '100%'}},
+      buttonStyles: {
+        root: { backgroundColor: 'transparent', height: '100%' },
+      },
       iconProps: {
         iconName: 'Refresh',
       },
@@ -131,22 +210,12 @@ function TopBar() {
   /**
    * @returns {import('office-ui-fabric-react').ICommandBarItemProps}
    */
-  function getKeyword() {
-    return {
-      key: 'keyword',
-      commandBarButtonAs: KeywordSearchBox,
-    };
-  }
-
-  /**
-   * @returns {import('office-ui-fabric-react').ICommandBarItemProps}
-   */
   function getFilters() {
     return {
       key: 'filters',
       name: 'Filters',
-      iconProps: {iconName: 'Filter'},
-      menuIconProps: {iconName: active ? 'ChevronUp' : 'ChevronDown'},
+      iconProps: { iconName: 'Filter' },
+      menuIconProps: { iconName: active ? 'ChevronUp' : 'ChevronDown' },
       onClick() {
         setActive(!active);
       },
@@ -156,7 +225,7 @@ function TopBar() {
             onClick={item.onClick}
             iconProps={item.iconProps}
             menuIconProps={item.menuIconProps}
-            styles={{root: {backgroundColor: 'transparent'}}}
+            styles={{ root: { backgroundColor: 'transparent' } }}
           >
             Filter
           </CommandBarButton>
@@ -165,263 +234,125 @@ function TopBar() {
     };
   }
 
-  /**
-   * @returns {import('office-ui-fabric-react').ICommandBarItemProps}
-   */
-  function getClear() {
-    return {
-      key: 'clear',
-      name: 'Clear',
-      buttonStyles: {root: {backgroundColor: 'transparent', height: '100%'}},
-      iconOnly: true,
-      iconProps: {
-        iconName: 'Cancel',
-      },
-      onClick() {
-        setFilter(new Filter());
-        setActive(false);
-      },
-    };
-  }
+  const ableStop =
+    selectedJobs.length > 0 && selectedJobs.every(job => isStoppable(job));
 
-  /**
-   * @returns {import('office-ui-fabric-react').ICommandBarItemProps}
-   */
-  function getUser() {
-    /**
-     * @param {React.SyntheticEvent} event
-     * @param {import('office-ui-fabric-react').IContextualMenuItem} item
-     */
-    function onClick(event, {key, checked}) {
-      event.preventDefault();
-      const {keyword, virtualClusters, statuses} = filter;
-      const users = new Set(filter.users);
-      if (checked) {
-        users.delete(key);
-      } else {
-        users.add(key);
-      }
-      setFilter(new Filter(keyword, users, virtualClusters, statuses));
-    }
-
-    /**
-     * @param {React.SyntheticEvent} event
-     */
-    function onClearClick(event) {
-      event.preventDefault();
-      const {keyword, virtualClusters, statuses} = filter;
-      setFilter(new Filter(keyword, new Set(), virtualClusters, statuses));
-    }
-
-    /**
-     * @param {string} key
-     * @param {string} text
-     * @returns {import('office-ui-fabric-react').IContextualMenuItem}
-     */
-    function getItem(key) {
-      return {
-        key,
-        text: key,
-        canCheck: true,
-        checked: filter.users.has(key),
-        onClick: onClick,
-      };
-    }
-
-    /** @type {import('office-ui-fabric-react').IContextualMenuItem[]} */
-    const subMenuItems = [];
-    if (username !== undefined) {
-      subMenuItems.push({
-        key: username,
-        text: '@Me',
-        canCheck: true,
-        checked: filter.users.has(username),
-        onClick: onClick,
-      });
-    }
-    subMenuItems.push(...Object.keys(users)
-      .filter((user) => user !== username).map(getItem));
-    subMenuItems.push({
-      key: 'divider',
-      itemType: ContextualMenuItemType.Divider,
-    }, {
-      key: '$clear',
-      text: 'Clear',
-      onClick: onClearClick,
-    });
-
-    return {
-      key: 'user',
-      text: `User`,
-      buttonStyles: {root: {backgroundColor: 'transparent'}},
-      iconProps: {
-        iconName: 'Contact',
-      },
-      subMenuProps: {items: subMenuItems},
-      commandBarButtonAs: FilterButton,
-    };
-  }
-
-  /**
-   * @returns {import('office-ui-fabric-react').ICommandBarItemProps}
-   */
-  function getVirtualCluster() {
-    /**
-     * @param {React.SyntheticEvent} event
-     * @param {import('office-ui-fabric-react').IContextualMenuItem} item
-     */
-    function onClick(event, {key, checked}) {
-      event.preventDefault();
-      const {keyword, users, statuses} = filter;
-      const virtualClusters = new Set(filter.virtualClusters);
-      if (checked) {
-        virtualClusters.delete(key);
-      } else {
-        virtualClusters.add(key);
-      }
-      setFilter(new Filter(keyword, users, virtualClusters, statuses));
-    }
-
-    /**
-     * @param {React.SyntheticEvent} event
-     */
-    function onClearClick(event) {
-      event.preventDefault();
-      const {keyword, users, statuses} = filter;
-      setFilter(new Filter(keyword, users, new Set(), statuses));
-    }
-
-    /**
-     * @param {string} key
-     * @param {string} text
-     * @returns {import('office-ui-fabric-react').IContextualMenuItem}
-     */
-    function getItem(key) {
-      return {
-        key,
-        text: key,
-        canCheck: true,
-        checked: filter.virtualClusters.has(key),
-        onClick: onClick,
-      };
-    }
-
-    return {
-      key: 'virtualCluster',
-      name: 'Virtual Cluster',
-      buttonStyles: {root: {backgroundColor: 'transparent'}},
-      iconProps: {
-        iconName: 'CellPhone',
-      },
-      subMenuProps: {
-        items: Object.keys(virtualClusters).map(getItem).concat([{
-            key: 'divider',
-            itemType: ContextualMenuItemType.Divider,
-          },
-          {
-            key: 'clear',
-            text: 'Clear',
-            onClick: onClearClick,
-          },
-        ]),
-      },
-      commandBarButtonAs: FilterButton,
-    };
-  }
-
-  /**
-   * @returns {import('office-ui-fabric-react').ICommandBarItemProps}
-   */
-  function getStatus() {
-    /**
-     * @param {React.SyntheticEvent} event
-     * @param {import('office-ui-fabric-react').IContextualMenuItem} item
-     */
-    function onClick(event, {key, checked}) {
-      event.preventDefault();
-      const {keyword, users, virtualClusters} = filter;
-      const statuses = new Set(filter.statuses);
-      if (checked) {
-        statuses.delete(key);
-      } else {
-        statuses.add(key);
-      }
-      setFilter(new Filter(keyword, users, virtualClusters, statuses));
-    }
-
-    /**
-     * @param {React.SyntheticEvent} event
-     */
-    function onClearClick(event) {
-      event.preventDefault();
-      const {keyword, users, virtualClusters} = filter;
-      setFilter(new Filter(keyword, users, virtualClusters, new Set()));
-    }
-
-    /**
-     * @param {string} key
-     * @param {string} text
-     * @returns {import('office-ui-fabric-react').IContextualMenuItem}
-     */
-    function getItem(key) {
-      return {
-        key,
-        text: key,
-        canCheck: true,
-        checked: filter.statuses.has(key),
-        onClick: onClick,
-      };
-    }
-
-    return {
-      key: 'status',
-      name: 'Status',
-      buttonStyles: {root: {backgroundColor: 'transparent'}},
-      iconProps: {
-        iconName: 'Clock',
-      },
-      subMenuProps: {
-        items: Object.keys(statuses).map(getItem).concat([{
-            key: 'divider',
-            itemType: ContextualMenuItemType.Divider,
-          },
-          {
-            key: 'clear',
-            text: 'Clear',
-            onClick: onClearClick,
-          },
-        ]),
-      },
-      commandBarButtonAs: FilterButton,
-    };
-  }
-
-  const topBarItems = [
-    selectedJobs.length ? getStop() : getNew(),
-    getRefresh(),
-  ];
+  const topBarItems = [ableStop ? getStop() : getNew(), getRefresh()];
   const topBarFarItems = [getFilters()];
 
-  const filterBarItems = [getKeyword()];
-  const filterBarFarItems = [
-    getUser(),
-    getVirtualCluster(),
-    getStatus(),
-    getClear(),
-  ];
+  // user filter preprocess
+  let userItems = Object.keys(users);
+  const currentUser = cookies.get('user');
+  const idx = userItems.findIndex(x => x === currentUser);
+  if (idx !== -1) {
+    userItems = [
+      CURRENT_USER_KEY,
+      ...userItems.slice(0, idx),
+      ...userItems.slice(idx + 1),
+    ];
+  }
+
+  const userFilter = new Set(filter.users);
+  if (userFilter.has(currentUser)) {
+    userFilter.delete(currentUser);
+    userFilter.add(CURRENT_USER_KEY);
+  }
+  const selectedItems = Array.from(userFilter);
+
+  const { spacing } = getTheme();
 
   return (
     <React.Fragment>
       <CommandBar
         items={topBarItems}
         farItems={topBarFarItems}
-        styles={{root: {backgroundColor: 'transparent'}}}
+        styles={{ root: { backgroundColor: 'transparent', padding: 0 } }}
       />
-      { active ? <CommandBar
-        items={filterBarItems}
-        farItems={filterBarFarItems}
-        styles={{root: {backgroundColor: 'transparent'}}}
-      /> : null }
+      {active && (
+        <Stack
+          horizontal
+          verticalAlign='stretch'
+          horizontalAlign='space-between'
+          styles={{
+            root: [
+              ColorClassNames.neutralLightBackground,
+              {
+                marginTop: spacing.s2,
+                padding: spacing.m,
+              },
+            ],
+          }}
+        >
+          <KeywordSearchBox />
+          <Stack horizontal>
+            <FilterButton
+              styles={{ root: { backgroundColor: 'transparent' } }}
+              text='User'
+              iconProps={{ iconName: 'Contact' }}
+              items={userItems}
+              selectedItems={selectedItems}
+              onSelect={users => {
+                const { keyword, virtualClusters, statuses } = filter;
+                const userFilter = new Set(users);
+                if (userFilter.has(CURRENT_USER_KEY)) {
+                  userFilter.delete(CURRENT_USER_KEY);
+                  userFilter.add(currentUser);
+                }
+                setFilter(
+                  new Filter(keyword, userFilter, virtualClusters, statuses),
+                );
+              }}
+              searchBox
+              clearButton
+            />
+            <FilterButton
+              styles={{ root: { backgroundColor: 'transparent' } }}
+              text='Virtual Cluster'
+              iconProps={{ iconName: 'CellPhone' }}
+              items={Object.keys(virtualClusters)}
+              selectedItems={Array.from(filter.virtualClusters)}
+              onSelect={virtualClusters => {
+                const { keyword, users, statuses } = filter;
+                setFilter(
+                  new Filter(
+                    keyword,
+                    users,
+                    new Set(virtualClusters),
+                    statuses,
+                  ),
+                );
+              }}
+              clearButton
+            />
+            <FilterButton
+              styles={{ root: { backgroundColor: 'transparent' } }}
+              text='Status'
+              iconProps={{ iconName: 'Clock' }}
+              items={Object.keys(statuses)}
+              selectedItems={Array.from(filter.statuses)}
+              onSelect={statuses => {
+                const { keyword, users, virtualClusters } = filter;
+                setFilter(
+                  new Filter(
+                    keyword,
+                    users,
+                    virtualClusters,
+                    new Set(statuses),
+                  ),
+                );
+              }}
+              clearButton
+            />
+            <CommandBarButton
+              styles={{
+                root: { backgroundColor: 'transparent', height: '100%' },
+              }}
+              iconProps={{ iconName: 'Cancel' }}
+              onClick={() => setFilter(new Filter())}
+            />
+          </Stack>
+        </Stack>
+      )}
     </React.Fragment>
   );
 }

@@ -12,7 +12,12 @@
         },
         "password": {
             "type": "string",
-            "description": "PAI cluster password",
+            "description": "PAI cluster password, please keep it empty if use token",
+            "minLength": 1
+        },
+        "token": {
+            "type": "string",
+            "description": "PAI cluster access token, please keep it empty if use password",
             "minLength": 1
         },
         "rest_server_uri": {
@@ -44,11 +49,26 @@
             "type": "string",
             "description": "PAI web portal endpoint",
             "pattern": "^(?!https?:\/\/).*"
+        },
+        "protocol_version": {
+            "type": "string",
+            "description": "PAI protocol version"
         }
     },
-    "required": [
-        "username",
-        "password",
-        "rest_server_uri"
+    "oneOf": [
+        {
+            "required": [
+                "username",
+                "password",
+                "rest_server_uri"
+            ]
+        },
+        {
+            "required": [
+                "username",
+                "token",
+                "rest_server_uri"
+            ]
+        }
     ]
 }

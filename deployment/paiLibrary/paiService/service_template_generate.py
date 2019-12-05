@@ -45,22 +45,22 @@ class service_template_generate:
 
         self.logger.info("Create template mapper for service {0}.".format(self.service_name))
 
-        servce_conf_dict = {
+        service_conf_dict = {
             "cluster_cfg": self.cluster_object_mode
         }
 
         self.logger.info("Done. Template mapper for service {0} is created.".format(self.service_name))
 
-        return servce_conf_dict
+        return service_conf_dict
 
     # Add "NodeAffinity" to service deployment yaml file
     # according to the "deploy-rules" in service.yaml config file
     # Currently support "In" and "NotIn" rules or the combination of them.
 
     def add_deploy_rule_to_yaml(self, str_src_yaml):
-        service_deploy_kind_list = ['DaemonSet', 'Deployment', 'StatefulSets', 'Pod']
+        service_deploy_kind_list = ['DaemonSet', 'Deployment', 'StatefulSet', 'Pod']
 
-        config = yaml.load(str_src_yaml)
+        config = yaml.load(str_src_yaml, yaml.SafeLoader)
 
         # judge whether it's a service deploy file, eg. exclude configmap
         # Some service may not being configured to run, for example when alert manager is not

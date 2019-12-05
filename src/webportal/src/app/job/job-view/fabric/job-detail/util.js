@@ -15,60 +15,14 @@
 // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-import {isNil} from 'lodash';
-import {DateTime, Interval} from 'luxon';
-
-export function getHumanizedJobStateString(jobInfo) {
-  const status = jobInfo.jobStatus;
-  let hjss = '';
-  if (status.state === 'JOB_NOT_FOUND') {
-    hjss = 'N/A';
-  } else if (status.state === 'WAITING') {
-    if (status.executionType === 'STOP') {
-      hjss = 'Stopping';
-    } else {
-      hjss = 'Waiting';
-    }
-  } else if (status.state === 'RUNNING') {
-    if (status.executionType === 'STOP') {
-      hjss = 'Stopping';
-    } else {
-      hjss = 'Running';
-    }
-  } else if (status.state === 'SUCCEEDED') {
-    hjss = 'Succeeded';
-  } else if (status.state === 'FAILED') {
-    hjss = 'Failed';
-  } else if (status.state === 'STOPPED') {
-    hjss = 'Stopped';
-  } else {
-    hjss = 'Unknown';
-  }
-  return hjss;
-}
-
-export function getDurationString(jobInfo) {
-  const start = jobInfo.jobStatus.createdTime && DateTime.fromMillis(jobInfo.jobStatus.createdTime);
-  const end = jobInfo.jobStatus.completedTime && DateTime.fromMillis(jobInfo.jobStatus.completedTime);
-  if (start) {
-    const dur = Interval.fromDateTimes(start, end || DateTime.utc()).toDuration(['days', 'hours', 'minutes', 'seconds']);
-    if (dur.days > 0) {
-      return dur.toFormat(`d'd' h'h' m'm' s's'`);
-    } else if (dur.hours > 0) {
-      return dur.toFormat(`h'h' m'm' s's'`);
-    } else if (dur.minutes > 0) {
-      return dur.toFormat(`m'm' s's'`);
-    } else {
-      return dur.toFormat(`s's'`);
-    }
-  } else {
-    return 'N/A';
-  }
-}
-
+import { isNil } from 'lodash';
+import { DateTime } from 'luxon';
 
 export function printDateTime(dt) {
-  if (dt > DateTime.utc().minus({week: 1}) && dt < DateTime.utc().minus({minute: 1})) {
+  if (
+    dt > DateTime.utc().minus({ week: 1 }) &&
+    dt < DateTime.utc().minus({ minute: 1 })
+  ) {
     return `${dt.toRelative()}, ${dt.toLocaleString(DateTime.TIME_24_SIMPLE)}`;
   } else {
     return dt.toLocaleString(DateTime.DATETIME_MED);
@@ -77,7 +31,7 @@ export function printDateTime(dt) {
 
 export function parseGpuAttr(attr) {
   const res = [];
-  for (let i = 0; attr !== 0; i++, attr>>=1) {
+  for (let i = 0; attr !== 0; i++, attr >>= 1) {
     if ((attr & 1) === 1) {
       res.push(i);
     }
@@ -86,26 +40,38 @@ export function parseGpuAttr(attr) {
   return res;
 }
 
-export function isJobV2(jobConfig) {
-  return !isNil(jobConfig.protocolVersion);
+export function isJobV2(rawJobConfig) {
+  return (
+    !isNil(rawJobConfig.protocol_version) ||
+    !isNil(rawJobConfig.protocolVersion)
+  );
 }
 
-export function getTaskConfig(jobConfig, name) {
-  if (jobConfig && jobConfig.taskRoles) {
-    if (isJobV2(jobConfig)) {
-      return jobConfig.taskRoles[name];
-    } else {
-      return jobConfig.taskRoles.find((x) => x.name === name);
-    }
+export function isClonable(rawJobConfig) {
+  // disable clone for old yaml job
+  if (isNil(rawJobConfig)) {
+    return false;
+  } else if (!isNil(rawJobConfig.protocol_version)) {
+    return false;
   } else {
-    return null;
+    return true;
   }
 }
 
-export const statusColorMapping = {
-  waiting: '#fcd116',
-  failed: '#eb1123',
-  running: '#0071bc',
-  succeeded: '#7fba00',
-  unknown: '#b1b5b8',
-};
+export function getTaskConfig(rawJobConfig, name) {
+  if (rawJobConfig && rawJobConfig.taskRoles) {
+    if (isJobV2(rawJobConfig)) {
+      // v2
+      return rawJobConfig.taskRoles[name];
+    } else {
+      // v1
+      return rawJobConfig.taskRoles.find(x => x.name === name);
+    }
+  }
+  return null;
+}
+
+export const HISTORY_DISABLE_MESSAGE =
+  'The job history was not enabled when deploying.';
+export const HISTORY_API_ERROR_MESSAGE =
+  'The job hisotry API is not healthy right now.';

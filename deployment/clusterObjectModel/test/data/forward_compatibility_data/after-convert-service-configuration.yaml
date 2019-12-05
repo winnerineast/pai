@@ -1,6 +1,7 @@
 cluster:
   common:
       cluster-id: pai_ut
+      cluster-type: yarn
       data-path: "/datastorage"
   docker-registry:
       namespace: ut
@@ -62,6 +63,6 @@ drivers:
 
 webportal:
   server-port: 9286
-
+  log-type: yarn
 pylon:
   port: 80
